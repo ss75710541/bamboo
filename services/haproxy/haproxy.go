@@ -29,5 +29,10 @@ func GetTemplateData(config *conf.Configuration, conn *zk.Conn) (*templateData, 
 		return nil, err
 	}
 
-	return &templateData{apps, services, runtime.NumCPU()}, nil
+	cores := runtime.NumCPU()
+	if cores > 64 {
+		return &templateData{apps, services, 64}, nil
+	}
+
+	return &templateData{apps, services, cores}, nil
 }
