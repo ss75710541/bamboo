@@ -1,16 +1,20 @@
 package event_bus
 
 import (
+	"fmt"
 	"github.com/QubitProducts/bamboo/Godeps/_workspace/src/github.com/samuel/go-zookeeper/zk"
 	"github.com/QubitProducts/bamboo/configuration"
 	"github.com/QubitProducts/bamboo/services/haproxy"
 	"github.com/QubitProducts/bamboo/services/template"
+	"net/http"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"time"
 )
+
+var TemplateInvalid bool
 
 type MarathonEvent struct {
 	// EventType can be
@@ -102,10 +106,10 @@ func ensureLatestConfig(conf *configuration.Configuration, conn *zk.Conn) (reloa
 		return
 	}
 
-	err = validateConfig(conf.HAProxy.ReloadValidationCommand, content)
+/*	err = validateConfig(conf.HAProxy.ReloadValidationCommand, content)
 	if err != nil {
 		return
-	}
+	}*/
 
 	defer cleanupConfig(conf.HAProxy.ReloadCleanupCommand)
 
@@ -128,15 +132,17 @@ func generateConfig(templatePath string, conf *configuration.Configuration, conn
 	templateData, err := haproxy.GetTemplateData(conf, conn)
 	if err != nil {
 		log.Println("Failed to retrieve template data")
+		TemplateInvalid = true
 		return
 	}
 
 	config, err = template.RenderTemplate(templatePath, string(templateContent), templateData)
 	if err != nil {
 		log.Println("Template syntax error")
+		TemplateInvalid = true
 		return
 	}
-
+	TemplateInvalid = false
 	return
 }
 
@@ -191,16 +197,31 @@ func changeConfig(conf *configuration.Configuration, newContent string) (reloade
 	// This failing scares me a lot, as could end up with very invalid config
 	// content. I'd suggest restoring the original config, but that adds all
 	// kinds of new and interesting failure cases
+	log.Println("Change Config")
 	err = ioutil.WriteFile(conf.HAProxy.OutputPath, []byte(newContent), 0666)
 	if err != nil {
 		log.Println("Failed to write template on path", conf.HAProxy.OutputPath)
 		return
 	}
 
-	err = execCommand(conf.HAProxy.ReloadCommand)
+/*	err = execCommand(conf.HAProxy.ReloadCommand)
 	if err != nil {
 		return
-	}
+	}*/
+
+	client := &http.Client{}
+        addr := fmt.Sprintf("%s:%s/api/haproxy", conf.HAProxy.IP, conf.HAProxy.Port)
+        req, err := http.NewRequest("PUT", addr, nil)
+        if err != nil {
+                log.Println("Failed to creat new http request: ", err)
+                return
+        }
+        resp, err := client.Do(req)
+        if err != nil {
+                log.Println("Http request failed: ", err)
+                return
+        }
+        defer resp.Body.Close()
 
 	reloaded = true
 	return
