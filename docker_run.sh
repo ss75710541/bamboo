@@ -8,4 +8,4 @@ docker run -it \
     -e BIND=":5090" \
     -e CONFIG_PATH="config/production.gateway.json" \
     --name=bamboo \
-    registry.shurenyun.com/haproxy-1.5.4:omega.v2
+    registry.shurenyun.com/bamboo-0.2.14:omega.v2.1
