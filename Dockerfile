@@ -18,9 +18,6 @@ WORKDIR /
 
 RUN sh /buildBamboo.sh
 
-VOLUME /var/log/supervisor
-VOLUME /config
-
-EXPOSE 80
+EXPOSE 5090
 
 CMD sh /run.sh   

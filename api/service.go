@@ -3,12 +3,14 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"io/ioutil"
 	"net/http"
 
 	"github.com/QubitProducts/bamboo/Godeps/_workspace/src/github.com/go-martini/martini"
 	zk "github.com/QubitProducts/bamboo/Godeps/_workspace/src/github.com/samuel/go-zookeeper/zk"
 	conf "github.com/QubitProducts/bamboo/configuration"
+	"github.com/QubitProducts/bamboo/services/event_bus"
 	"github.com/QubitProducts/bamboo/services/service"
 )
 
@@ -89,6 +91,14 @@ func extractServiceModel(r *http.Request) (service.Service, error) {
 
 func responseError(w http.ResponseWriter, message string) {
 	http.Error(w, message, http.StatusBadRequest)
+}
+
+func HealthCheck(w http.ResponseWriter, r *http.Request) {
+	if event_bus.TemplateInvalid {
+		http.Error(w, "template error", http.StatusInternalServerError)
+		return
+	}
+	io.WriteString(w, "template OK")
 }
 
 func responseJSON(w http.ResponseWriter, data interface{}) {
