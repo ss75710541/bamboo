@@ -89,6 +89,8 @@ func initServer(conf *configuration.Configuration, conn *zk.Conn, eventBus *even
 	// Status live information
 	router := martini.Classic()
 	router.Get("/status", api.HandleStatus)
+	// HealthCheck API
+	router.Get("/healthcheck", api.HealthCheck)
 
 	// API
 	router.Group("/api", func(api martini.Router) {
