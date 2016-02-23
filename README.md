@@ -328,6 +328,16 @@ npm install && napa
 nf start
 ```
 
+#### Health Check
+  - [GET http://localhost:5090/healthcheck](#healthCheck)  :healthCheck  检查服务是否正常运行
+
+#### GET `http://localhost:5090/healthcheck`
+检查服务是否正常运行 (healthCheck)   </br>
+***Http Code***
+`
+500 or 200
+`
+500表示bamboo模板有问题，200表示bamboo模板正常．
 
 
 ## License
