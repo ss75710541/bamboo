@@ -1,4 +1,4 @@
-# Bamboo  [![Build Status](https://travis-ci.org/QubitProducts/bamboo.svg?branch=master)](https://travis-ci.org/QubitProducts/bamboo)
+# Bamboo  [![Build Status](https://travis-ci.org/QubitProducts/bamboo.svg?branch=master)](https://travis-ci.org/QubitProducts/bamboo) [![Coverage Status](https://coveralls.io/repos/QubitProducts/bamboo/badge.svg?branch=coverage&service=github)](https://coveralls.io/github/QubitProducts/bamboo?branch=coverage)
 
 ![bamboo-logo](https://cloud.githubusercontent.com/assets/37033/4110258/a8cc58bc-31ef-11e4-87c9-dd20bd2468c2.png)
 
@@ -65,7 +65,9 @@ This section tries to explain usage in code comment style:
   // Marathon instance configuration
   "Marathon": {
     // Marathon service HTTP endpoints
-    "Endpoint": "http://marathon1:8080,http://marathon2:8080,http://marathon3:8080"
+    "Endpoint": "http://marathon1:8080,http://marathon2:8080,http://marathon3:8080",
+    // Use the Marathon HTTP event streaming feature (Bamboo 0.2.16, Marathon v0.9.0)
+    "UseEventStream": true
   },
 
   "Bamboo": {
@@ -312,7 +314,7 @@ cd $GOPATH/src/github.com/QubitProducts/bamboo
 # Build your binary
 go build
 
-# Run test
+# Run test (requires a local zookeeper running)
 goconvey
 ```
 

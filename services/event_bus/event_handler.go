@@ -2,13 +2,13 @@ package event_bus
 
 import (
 	"fmt"
-	"github.com/QubitProducts/bamboo/Godeps/_workspace/src/github.com/samuel/go-zookeeper/zk"
 	"github.com/QubitProducts/bamboo/configuration"
 	"github.com/QubitProducts/bamboo/services/haproxy"
+	"github.com/QubitProducts/bamboo/services/service"
 	"github.com/QubitProducts/bamboo/services/template"
-	"net/http"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"time"
@@ -33,8 +33,8 @@ type ServiceEvent struct {
 }
 
 type Handlers struct {
-	Conf      *configuration.Configuration
-	Zookeeper *zk.Conn
+	Conf    *configuration.Configuration
+	Storage service.Storage
 }
 
 func (h *Handlers) MarathonEventHandler(event MarathonEvent) {
@@ -56,7 +56,7 @@ func init() {
 		log.Println("Starting update loop")
 		for {
 			h := <-updateChan
-			handleHAPUpdate(h.Conf, h.Zookeeper)
+			handleHAPUpdate(h.Conf, h.Storage)
 		}
 	}()
 }
@@ -77,9 +77,9 @@ func queueUpdate(h *Handlers) {
 	<-queueUpdateSem
 }
 
-func handleHAPUpdate(conf *configuration.Configuration, conn *zk.Conn) {
+func handleHAPUpdate(conf *configuration.Configuration, storage service.Storage) {
 	reloadStart := time.Now()
-	reloaded, err := ensureLatestConfig(conf, conn)
+	reloaded, err := ensureLatestConfig(conf, storage)
 
 	if err != nil {
 		conf.StatsD.Increment(1.0, "haproxy.reload.error", 1)
@@ -95,8 +95,8 @@ func handleHAPUpdate(conf *configuration.Configuration, conn *zk.Conn) {
 }
 
 // For values of 'latest' conforming to general relativity.
-func ensureLatestConfig(conf *configuration.Configuration, conn *zk.Conn) (reloaded bool, err error) {
-	content, err := generateConfig(conf.HAProxy.TemplatePath, conf, conn)
+func ensureLatestConfig(conf *configuration.Configuration, storage service.Storage) (reloaded bool, err error) {
+	content, err := generateConfig(conf.HAProxy.TemplatePath, conf, storage)
 	if err != nil {
 		return
 	}
@@ -106,10 +106,10 @@ func ensureLatestConfig(conf *configuration.Configuration, conn *zk.Conn) (reloa
 		return
 	}
 
-/*	err = validateConfig(conf.HAProxy.ReloadValidationCommand, content)
-	if err != nil {
-		return
-	}*/
+	/*	err = validateConfig(conf.HAProxy.ReloadValidationCommand, content)
+		if err != nil {
+			return
+		}*/
 
 	defer cleanupConfig(conf.HAProxy.ReloadCleanupCommand)
 
@@ -122,14 +122,14 @@ func ensureLatestConfig(conf *configuration.Configuration, conn *zk.Conn) (reloa
 }
 
 // Generates the new config to be written
-func generateConfig(templatePath string, conf *configuration.Configuration, conn *zk.Conn) (config string, err error) {
+func generateConfig(templatePath string, conf *configuration.Configuration, storage service.Storage) (config string, err error) {
 	templateContent, err := ioutil.ReadFile(templatePath)
 	if err != nil {
 		log.Println("Failed to read template contents")
 		return
 	}
 
-	templateData, err := haproxy.GetTemplateData(conf, conn)
+	templateData, err := haproxy.GetTemplateData(conf, storage)
 	if err != nil {
 		log.Println("Failed to retrieve template data")
 		TemplateInvalid = true
@@ -204,24 +204,24 @@ func changeConfig(conf *configuration.Configuration, newContent string) (reloade
 		return
 	}
 
-/*	err = execCommand(conf.HAProxy.ReloadCommand)
-	if err != nil {
-		return
-	}*/
+	/*	err = execCommand(conf.HAProxy.ReloadCommand)
+		if err != nil {
+			return
+		}*/
 
 	client := &http.Client{}
-        addr := fmt.Sprintf("%s:%s/api/haproxy", conf.HAProxy.IP, conf.HAProxy.Port)
-        req, err := http.NewRequest("PUT", addr, nil)
-        if err != nil {
-                log.Println("Failed to creat new http request: ", err)
-                return
-        }
-        resp, err := client.Do(req)
-        if err != nil {
-                log.Println("Http request failed: ", err)
-                return
-        }
-        defer resp.Body.Close()
+	addr := fmt.Sprintf("%s:%s/api/haproxy", conf.HAProxy.IP, conf.HAProxy.Port)
+	req, err := http.NewRequest("PUT", addr, nil)
+	if err != nil {
+		log.Println("Failed to creat new http request: ", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("Http request failed: ", err)
+		return
+	}
+	defer resp.Body.Close()
 
 	reloaded = true
 	return
