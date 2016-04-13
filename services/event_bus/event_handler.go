@@ -1,17 +1,22 @@
 package event_bus
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/QubitProducts/bamboo/configuration"
-	"github.com/QubitProducts/bamboo/services/haproxy"
-	"github.com/QubitProducts/bamboo/services/service"
-	"github.com/QubitProducts/bamboo/services/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/QubitProducts/bamboo/Godeps/_workspace/src/github.com/samuel/go-zookeeper/zk"
+	"github.com/QubitProducts/bamboo/configuration"
+	"github.com/QubitProducts/bamboo/services/application"
+	"github.com/QubitProducts/bamboo/services/haproxy"
+	"github.com/QubitProducts/bamboo/services/service"
+	"github.com/QubitProducts/bamboo/services/template"
 )
 
 var TemplateInvalid bool
@@ -32,9 +37,15 @@ type ServiceEvent struct {
 	EventType string
 }
 
+type WeightEvent struct {
+	EventType string
+	Event     zk.Event
+}
+
 type Handlers struct {
-	Conf    *configuration.Configuration
-	Storage service.Storage
+	Conf       *configuration.Configuration
+	Storage    service.Storage
+	AppStorage application.Storage
 }
 
 func (h *Handlers) MarathonEventHandler(event MarathonEvent) {
@@ -47,6 +58,43 @@ func (h *Handlers) ServiceEventHandler(event ServiceEvent) {
 	log.Println("Domain mapping: Stated changed")
 	queueUpdate(h)
 	h.Conf.StatsD.Increment(1.0, "reload.domain", 1)
+}
+
+func (h *Handlers) WeightEventHandler(event WeightEvent) {
+	log.Println("Weight changed", event.Event.Path, "type", event.Event.Type)
+	apps, err := h.AppStorage.All()
+	if err != nil {
+		log.Println("Error: can't fetch apps", err.Error())
+		return
+	}
+	for _, app := range apps {
+		updateWeight(app, h.Conf)
+	}
+}
+
+func updateWeight(app application.Application, conf *configuration.Configuration) {
+	json, err := json.Marshal(app)
+	if err != nil {
+		log.Println(err.Error())
+		log.Println("Error: can't update app weight")
+		return
+	}
+
+	client := &http.Client{}
+	addr := fmt.Sprintf("%s:%s/api/weight", conf.HAProxy.IP, conf.HAProxy.Port)
+	req, err := http.NewRequest("PUT", addr, bytes.NewBuffer(json))
+	if err != nil {
+		log.Println("Failed to creat new http request: ", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("Http request failed: ", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Println("updated", string(json), resp.StatusCode)
 }
 
 var updateChan = make(chan *Handlers, 1)

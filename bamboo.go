@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -82,9 +83,10 @@ func main() {
 	}
 
 	// Register handlers
-	handlers := event_bus.Handlers{Conf: &conf, Storage: storage}
+	handlers := event_bus.Handlers{Conf: &conf, Storage: storage, AppStorage: appStorage}
 	eventBus.Register(handlers.MarathonEventHandler)
 	eventBus.Register(handlers.ServiceEventHandler)
+	eventBus.Register(handlers.WeightEventHandler)
 	eventBus.Publish(event_bus.MarathonEvent{EventType: "bamboo_startup", Timestamp: time.Now().Format(time.RFC3339)})
 
 	// Handle gracefully exit
@@ -188,13 +190,21 @@ func createAndListen(conf configuration.Zookeeper) (chan zk.Event, *zk.Conn) {
 }
 
 func listenToZookeeper(conf configuration.Configuration, eventBus *event_bus.EventBus) *zk.Conn {
-	serviceCh, serviceConn := createAndListen(conf.Bamboo.Zookeeper)
+	serviceConf := conf.Bamboo.Zookeeper
+	serviceConf.Path = fmt.Sprintf("%s/%s", serviceConf.Path, "services")
+	serviceCh, serviceConn := createAndListen(serviceConf)
+
+	weightConf := conf.Bamboo.Zookeeper
+	weightConf.Path = fmt.Sprintf("%s/%s", weightConf.Path, "applications")
+	weightCh, _ := createAndListen(weightConf)
 
 	go func() {
 		for {
 			select {
 			case _ = <-serviceCh:
 				eventBus.Publish(event_bus.ServiceEvent{EventType: "change"})
+			case e := <-weightCh:
+				eventBus.Publish(event_bus.WeightEvent{EventType: "change", Event: e})
 			}
 		}
 	}()
