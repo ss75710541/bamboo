@@ -1,23 +1,43 @@
 package haproxy
 
 import (
+	"encoding/json"
+	"fmt"
+	"log"
 	"runtime"
 
 	conf "github.com/QubitProducts/bamboo/configuration"
+	"github.com/QubitProducts/bamboo/services/application"
 	"github.com/QubitProducts/bamboo/services/marathon"
 	"github.com/QubitProducts/bamboo/services/service"
 )
 
 type templateData struct {
-	Apps     marathon.AppList
-	Services map[string]service.Service
-	NBProc   int
+	Frontends []Frontend
+	Weights   map[string]int
+	Services  map[string]service.Service
+	NBProc    int
 }
 
-func GetTemplateData(config *conf.Configuration, storage service.Storage) (*templateData, error) {
+type Server struct {
+	Name    string
+	Version string
+	Host    string
+	Port    int
+	Weight  int
+}
 
+type Frontend struct {
+	Name     string
+	Protocol string
+	Bind     int
+	Servers  []Server
+}
+
+var FrontendMap map[string]Frontend = make(map[string]Frontend)
+
+func GetTemplateData(config *conf.Configuration, storage service.Storage, appStorage application.Storage) (*templateData, error) {
 	apps, err := marathon.FetchApps(config.Marathon, config)
-
 	if err != nil {
 		return nil, err
 	}
@@ -27,6 +47,14 @@ func GetTemplateData(config *conf.Configuration, storage service.Storage) (*temp
 		return nil, err
 	}
 
+	zkWeights, err := appStorage.All()
+	if err != nil {
+		return nil, err
+	}
+	apps = handleCanary(apps, zkWeights)
+	frontends := formFrontends(apps)
+	weightMap := formWeightMap(frontends, zkWeights)
+
 	byName := make(map[string]service.Service)
 	for _, service := range services {
 		byName[service.Id] = service
@@ -34,8 +62,148 @@ func GetTemplateData(config *conf.Configuration, storage service.Storage) (*temp
 
 	cores := runtime.NumCPU()
 	if cores > 64 {
-		return &templateData{apps, byName, 64}, nil
-	} else {
-		return &templateData{apps, byName, cores}, nil
+		cores = 64
 	}
+	return &templateData{frontends, weightMap, byName, cores}, nil
+}
+
+func formWeightMap(frontends []Frontend, zkWeights []application.Weight) map[string]int {
+	weightMap := map[string]int{}
+	for _, weight := range zkWeights {
+		if frontend, ok := FrontendMap[weight.ID]; ok {
+			servers := CalcWeights(frontend, weight)
+			for _, server := range servers {
+				weightMap[server["server"].(string)] = server["weight"].(int)
+			}
+		}
+	}
+	return weightMap
+}
+
+func formFrontends(apps marathon.AppList) []Frontend {
+	frontends := []Frontend{}
+	for _, app := range apps {
+		if len(app.Endpoints) > 0 {
+			for epIdx, endpoint := range app.Endpoints {
+				frontend := Frontend{
+					Name:     fmt.Sprintf("%s-%s-%d", app.Frontend, endpoint.Protocol, endpoint.Bind),
+					Protocol: endpoint.Protocol,
+					Bind:     endpoint.Bind,
+				}
+
+				servers := []Server{}
+				for _, task := range app.Tasks {
+					server := Server{
+						Name:    fmt.Sprintf("%s-%s-%d", task.Server, task.Version, task.Ports[epIdx]),
+						Version: task.Version,
+						Host:    task.Host,
+						Port:    task.Ports[epIdx],
+						Weight:  task.Weight,
+					}
+					servers = append(servers, server)
+				}
+				frontend.Servers = servers
+
+				frontends = append(frontends, frontend)
+				FrontendMap[app.Id] = frontend
+			}
+		}
+	}
+	return frontends
+}
+
+func handleCanary(apps marathon.AppList, weights []application.Weight) (result marathon.AppList) {
+	weightMap := extractWeights(weights)
+	weightMapJson, _ := json.Marshal(weightMap)
+	log.Println("weightMap", string(weightMapJson))
+	result = marathon.AppList{}
+	for _, app := range apps {
+		weight, hasWeight := weightMap[app.Id]
+		log.Println("weight", weight, "hasWeight", hasWeight)
+		newTasks := []marathon.Task{}
+		for _, task := range app.Tasks {
+			if task.Version == app.CurVsn {
+				task.Weight = 1
+			} else {
+				task.Weight = 0
+			}
+			log.Println("task version", task.Version, "curVsn", app.CurVsn)
+			log.Println("task weight", task.Weight)
+			newTasks = append(newTasks, task)
+		}
+		app.Tasks = newTasks
+		result = append(result, app)
+	}
+	return result
+}
+
+func extractWeights(weights []application.Weight) map[string]application.Weight {
+	weightMap := make(map[string]application.Weight, len(weights))
+	for _, weight := range weights {
+		weightMap[weight.ID] = weight
+	}
+
+	return weightMap
+}
+
+//CalcWeights clac server weights
+func CalcWeights(frontend Frontend, weight application.Weight) []map[string]interface{} {
+	versionMap := formVersionMap(frontend)
+	versionMapJson, _ := json.Marshal(versionMap)
+	log.Println("versionMap", string(versionMapJson))
+
+	versionWeights := formVersionWeights(weight, versionMap)
+	versionWeightsJson, _ := json.Marshal(versionWeights)
+	log.Println("versionWeights", string(versionWeightsJson))
+
+	servers := formServers(frontend, versionWeights)
+	serversJson, _ := json.Marshal(servers)
+	log.Println("servers", string(serversJson))
+
+	return servers
+}
+
+func formServers(frontend Frontend, weights map[string][2]int) []map[string]interface{} {
+	servers := []map[string]interface{}{}
+	for _, server := range frontend.Servers {
+		weight := weights[server.Version]
+		w, r := weight[0], weight[1]
+		if r > 0 {
+			w += r
+			weight[1] = 0
+			weights[server.Version] = weight
+		}
+		svr := map[string]interface{}{
+			"frontend": frontend.Name,
+			"server":   server.Name,
+			"weight":   w,
+		}
+		servers = append(servers, svr)
+	}
+	return servers
+}
+
+func formVersionWeights(weight application.Weight, versionMap map[string][]Server) map[string][2]int {
+	weights := map[string][2]int{}
+	for vsn, servers := range versionMap {
+		len := len(servers)
+		exactWeight := weight.Versions[vsn] / len
+		remainder := weight.Versions[vsn] % len
+		weights[vsn] = [2]int{exactWeight, remainder}
+	}
+	return weights
+}
+
+func formVersionMap(frontend Frontend) map[string][]Server {
+	versions := map[string][]Server{}
+	for _, server := range frontend.Servers {
+		servers, ok := versions[server.Version]
+		if ok {
+			servers = append(servers, server)
+		} else {
+			servers = []Server{server}
+		}
+		versions[server.Version] = servers
+	}
+	return versions
 }

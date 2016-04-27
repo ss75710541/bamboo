@@ -97,7 +97,7 @@ func main() {
 }
 
 func initServer(conf *configuration.Configuration, storage service.Storage, appStorage application.Storage, eventBus *event_bus.EventBus) {
-	stateAPI := api.StateAPI{Config: conf, Storage: storage}
+	stateAPI := api.StateAPI{Config: conf, Storage: storage, AppStorage: appStorage}
 	serviceAPI := api.ServiceAPI{Config: conf, Storage: storage}
 	eventSubAPI := api.EventSubscriptionAPI{Conf: conf, EventBus: eventBus}
 	weightAPI := api.WeightAPI{Config: conf, Storage: appStorage}
@@ -121,9 +121,9 @@ func initServer(conf *configuration.Configuration, storage service.Storage, appS
 		api.Post("/marathon/event_callback", eventSubAPI.Callback)
 		// Weight API
 		api.Get("/weight", weightAPI.All)
-		api.Post("/weight", weightAPI.Create)
+		api.Post("/weight", weightAPI.Put)
 		api.Put("/weight", weightAPI.Put)
-		api.Delete("/weight/:app_id", weightAPI.Delete)
+		api.Delete("/weight/:id", weightAPI.Delete)
 	})
 
 	// Static pages
@@ -195,19 +195,26 @@ func listenToZookeeper(conf configuration.Configuration, eventBus *event_bus.Eve
 	serviceCh, serviceConn := createAndListen(serviceConf)
 
 	weightConf := conf.Bamboo.Zookeeper
-	weightConf.Path = fmt.Sprintf("%s/%s", weightConf.Path, "applications")
+	weightConf.Path = fmt.Sprintf("%s/%s", weightConf.Path, "weights")
 	weightCh, _ := createAndListen(weightConf)
 
 	go func() {
 		for {
 			select {
-			case _ = <-serviceCh:
+			case <-serviceCh:
 				eventBus.Publish(event_bus.ServiceEvent{EventType: "change"})
-			case e := <-weightCh:
-				eventBus.Publish(event_bus.WeightEvent{EventType: "change", Event: e})
 			}
 		}
 	}()
+	go func() {
+		for {
+			select {
+			case <-weightCh:
+				eventBus.Publish(event_bus.WeightEvent{EventType: "change"})
+			}
+		}
+	}()
+
 	return serviceConn
 }
 

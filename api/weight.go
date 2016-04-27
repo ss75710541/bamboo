@@ -22,55 +22,39 @@ type WeightAPI struct {
 }
 
 func (w *WeightAPI) All(rw http.ResponseWriter, r *http.Request) {
-	applications, err := w.Storage.All()
+	weights, err := w.Storage.All()
 	if err != nil {
 		responseError(rw, err.Error())
 		return
 	}
 
-	byId := make(map[string]application.Application, len(applications))
-	for _, app := range applications {
-		byId[app.ID] = app
+	byId := make(map[string]application.Weight, len(weights))
+	for _, weight := range weights {
+		byId[weight.ID] = weight
 	}
 
 	responseJSON(rw, byId)
 }
 
-func (w *WeightAPI) Create(rw http.ResponseWriter, r *http.Request) {
-	app, err := parseApplication(r)
+func (w *WeightAPI) Put(rw http.ResponseWriter, r *http.Request) {
+	weight, err := parseBody(r)
 	if err != nil {
 		responseError(rw, err.Error())
 		return
 	}
 
-	err = w.Storage.Upsert(app)
+	err = w.Storage.Upsert(weight)
 	if err != nil {
 		responseError(rw, err.Error())
 		return
 	}
 
-	responseJSON(rw, app)
-}
-
-func (w *WeightAPI) Put(params martini.Params, rw http.ResponseWriter, r *http.Request) {
-	app, err := parseApplication(r)
-	if err != nil {
-		responseError(rw, err.Error())
-		return
-	}
-
-	err = w.Storage.Upsert(app)
-	if err != nil {
-		responseError(rw, err.Error())
-		return
-	}
-
-	responseJSON(rw, app)
+	responseJSON(rw, weight)
 }
 
 func (w *WeightAPI) Delete(params martini.Params, rw http.ResponseWriter, r *http.Request) {
-	appID := params["app_id"]
-	err := w.Storage.Delete(appID)
+	id := params["id"]
+	err := w.Storage.Delete(id)
 	if err != nil {
 		responseError(rw, err.Error())
 		return
@@ -79,14 +63,14 @@ func (w *WeightAPI) Delete(params martini.Params, rw http.ResponseWriter, r *htt
 	responseJSON(rw, new(map[string]string))
 }
 
-func parseApplication(r *http.Request) (application.Application, error) {
-	var appModel application.Application
+func parseBody(r *http.Request) (application.Weight, error) {
+	var weight application.Weight
 	payload, _ := ioutil.ReadAll(r.Body)
 
-	err := json.Unmarshal(payload, &appModel)
+	err := json.Unmarshal(payload, &weight)
 	if err != nil {
-		return appModel, err
+		return weight, err
 	}
 
-	return appModel, nil
+	return weight, nil
 }

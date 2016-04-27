@@ -13,7 +13,7 @@ import (
 
 var (
 	//ErrBadBody invalid bytes
-	ErrBadBody = errors.New("Bad application bytes")
+	ErrBadBody = errors.New("Bad weight bytes")
 )
 
 type ZKStorage struct {
@@ -27,14 +27,14 @@ func NewZKStorage(conn *zk.Conn, conf conf.Zookeeper) (s *ZKStorage, err error) 
 	s = &ZKStorage{
 		conn: conn,
 		conf: conf,
-		path: fmt.Sprintf("%s/%s", conf.Path, "applications"),
+		path: fmt.Sprintf("%s/%s", conf.Path, "weights"),
 		acl:  defaultACL(),
 	}
 	err = s.ensurePathExists()
 	return s, err
 }
 
-func (z *ZKStorage) All() (applications []Application, err error) {
+func (z *ZKStorage) All() (weights []Weight, err error) {
 	err = z.ensurePathExists()
 	if err != nil {
 		return
@@ -45,7 +45,7 @@ func (z *ZKStorage) All() (applications []Application, err error) {
 		return
 	}
 
-	applications = make([]Application, 0, len(keys))
+	weights = make([]Weight, 0, len(keys))
 	for _, childPath := range keys {
 		body, _, err := z.conn.Get(z.path + "/" + childPath)
 		if err != nil {
@@ -57,20 +57,20 @@ func (z *ZKStorage) All() (applications []Application, err error) {
 			return nil, err
 		}
 
-		app, err := parseApplication(body, path)
+		weight, err := parseWeight(body, path)
 		if err != nil {
-			log.Printf("Failed to parse application at %v: %v", path, err)
+			log.Printf("Failed to parse weight at %v: %v", path, err)
 			continue
 		}
 
-		applications = append(applications, app)
+		weights = append(weights, weight)
 	}
 
 	return
 }
 
-func (z *ZKStorage) Upsert(app Application) (err error) {
-	body, err := encodeApplication(app)
+func (z *ZKStorage) Upsert(weight Weight) (err error) {
+	body, err := encodeWeight(weight)
 
 	if err != nil {
 		return
@@ -81,7 +81,7 @@ func (z *ZKStorage) Upsert(app Application) (err error) {
 		return err
 	}
 
-	path := z.applicationPath(app.ID)
+	path := z.weightPath(weight.ID)
 
 	ok, _, err := z.conn.Exists(path)
 	if err != nil {
@@ -112,13 +112,13 @@ func (z *ZKStorage) Upsert(app Application) (err error) {
 	return
 }
 
-func (z *ZKStorage) Delete(appId string) error {
-	path := z.applicationPath(appId)
+func (z *ZKStorage) Delete(id string) error {
+	path := z.weightPath(id)
 	log.Println("path", path)
 	return z.conn.Delete(path, -1)
 }
 
-func (z *ZKStorage) applicationPath(id string) string {
+func (z *ZKStorage) weightPath(id string) string {
 	return z.path + "/" + escapePath(id)
 }
 
@@ -150,16 +150,16 @@ func defaultACL() []zk.ACL {
 	return []zk.ACL{zk.ACL{Perms: zk.PermAll, Scheme: "world", ID: "anyone"}}
 }
 
-func parseApplication(body []byte, path string) (app Application, err error) {
-	err = json.Unmarshal(body, &app)
+func parseWeight(body []byte, path string) (weight Weight, err error) {
+	err = json.Unmarshal(body, &weight)
 	if err != nil {
-		return app, ErrBadBody
+		return weight, ErrBadBody
 	}
-	app.ID = path
+	weight.ID = path
 
-	return app, nil
+	return weight, nil
 }
 
-func encodeApplication(app Application) ([]byte, error) {
-	return json.Marshal(app)
+func encodeWeight(weight Weight) ([]byte, error) {
+	return json.Marshal(weight)
 }

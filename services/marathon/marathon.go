@@ -2,18 +2,26 @@ package marathon
 
 import (
 	"encoding/json"
-	"github.com/QubitProducts/bamboo/configuration"
+	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
+
+	"github.com/QubitProducts/bamboo/configuration"
 )
 
 // Describes an app process running
 type Task struct {
-	Host  string
-	Port  int
-	Ports []int
+	Frontend string
+	Server   string
+	Host     string
+	Port     int
+	Ports    []int
+	Version  string
+	Weight   int
 }
 
 // A health check on the application
@@ -26,10 +34,15 @@ type HealthCheck struct {
 	PortIndex int
 }
 
+type Endpoint struct {
+	Protocol string
+	Bind     int
+}
+
 // An app may have multiple processes
 type App struct {
 	Id              string
-	EscapedId       string
+	Frontend        string
 	HealthCheckPath string
 	HealthChecks    []HealthCheck
 	Tasks           []Task
@@ -37,6 +50,8 @@ type App struct {
 	ServicePorts    []int
 	Env             map[string]string
 	Labels          map[string]string
+	Endpoints       []Endpoint
+	CurVsn          string
 }
 
 type AppList []App
@@ -182,58 +197,129 @@ func fetchTasks(endpoint string, conf *configuration.Configuration) (map[string]
 }
 
 func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]marathonApp) AppList {
+	appMap := map[string]*App{}
+	for _, mApp := range marathonApps {
+		mappJson, _ := json.Marshal(mApp)
+		log.Println("mapp", string(mappJson))
+		appPath := formPath(mApp)
+		log.Println("appPath", string(appPath))
+		app, ok := appMap[appPath]
+		if !ok {
+			newApp := formApp(mApp, appPath)
+			app = &newApp
+			appMap[appPath] = app
+		}
+		if mApp.Env["SRY_APP_VSN"] < app.CurVsn {
+			app.CurVsn = mApp.Env["SRY_APP_VSN"]
+		}
+		tasks := formTasks(mApp, *app, tasksById)
+		tasksJson, _ := json.Marshal(tasks)
+		log.Println("tasks", string(tasksJson))
+		app.Tasks = append(app.Tasks, tasks...)
+		appJson, _ := json.Marshal(app)
+		log.Println("app", string(appJson))
+	}
+	appMapJson, _ := json.Marshal(appMap)
+	log.Println("app", string(appMapJson))
 
 	apps := AppList{}
-
-	for appId, mApp := range marathonApps {
-
-		// Try to handle old app id format without slashes
-		appPath := appId
-		if !strings.HasPrefix(appId, "/") {
-			appPath = "/" + appId
-		}
-
-		// build App from marathonApp
-		app := App{
-			Id:              appPath,
-			EscapedId:       strings.Replace(appId, "/", "::", -1),
-			HealthCheckPath: parseHealthCheckPath(mApp.HealthChecks),
-			Env:             mApp.Env,
-			Labels:          mApp.Labels,
-		}
-
-		app.HealthChecks = make([]HealthCheck, 0, len(mApp.HealthChecks))
-		for _, marathonCheck := range mApp.HealthChecks {
-			check := HealthCheck{
-				Protocol:  marathonCheck.Protocol,
-				Path:      marathonCheck.Path,
-				PortIndex: marathonCheck.PortIndex,
-			}
-			app.HealthChecks = append(app.HealthChecks, check)
-		}
-
-		if len(mApp.Ports) > 0 {
-			app.ServicePort = mApp.Ports[0]
-			app.ServicePorts = mApp.Ports
-		}
-
-		// build Tasks for this App
-		tasks := []Task{}
-		for _, mTask := range tasksById[appId] {
-			if len(mTask.Ports) > 0 {
-				t := Task{
-					Host:  mTask.Host,
-					Port:  mTask.Ports[0],
-					Ports: mTask.Ports,
-				}
-				tasks = append(tasks, t)
-			}
-		}
-		app.Tasks = tasks
-
-		apps = append(apps, app)
+	for _, app := range appMap {
+		apps = append(apps, *app)
 	}
 	return apps
+}
+
+func formTasks(mApp marathonApp, app App, tasksById map[string]marathonTaskList) []Task {
+	tasks := []Task{}
+	for _, mTask := range tasksById[mApp.Id] {
+		if len(mTask.Ports) > 0 {
+			server := fmt.Sprintf("%s-%s", app.Frontend, mTask.Host)
+			t := Task{
+				Frontend: app.Frontend,
+				Server:   server,
+				Host:     mTask.Host,
+				Port:     mTask.Ports[0],
+				Ports:    mTask.Ports,
+				Version:  mApp.Env["SRY_APP_VSN"],
+				Weight:   1,
+			}
+			tasks = append(tasks, t)
+		}
+	}
+	return tasks
+}
+
+func formEndpoints(str string) []Endpoint {
+	//{{ range $tcpIdx, $endpoint := Split $app.Env.BB_DM_ENDPOINTS "," }}
+	//{{ $endpointSlices := Split $endpoint ":" }}
+	//{{ $svcType := index $endpointSlices 0 }}
+	//{{ $protocol := index $endpointSlices 1 }}
+	//{{ $uri := index $endpointSlices 2 }}
+	//{{ $port := index $endpointSlices 3 }}
+	//# len {{ len $end
+	//BB_DM_ENDPOINTS=pub:http:nil:9800,pub:tcp:nil:9801
+
+	epStrSlices := strings.Split(str, ",")
+	endpoints := []Endpoint{}
+	for _, epStr := range epStrSlices {
+		epParts := strings.Split(epStr, ":")
+		bind, err := strconv.Atoi(epParts[3])
+		if err != nil {
+			log.Panicln("bad bind value", err.Error())
+		}
+		endpoint := Endpoint{
+			Protocol: epParts[1],
+			Bind:     bind,
+		}
+
+		endpoints = append(endpoints, endpoint)
+	}
+
+	return endpoints
+}
+
+func formPath(mApp marathonApp) string {
+	// Try to handle old app id format without slashes
+	var appPath string
+	if envAppId, ok := mApp.Env["SRY_APP_ID"]; ok {
+		appPath = envAppId
+	} else {
+		appPath = mApp.Id
+	}
+	if !strings.HasPrefix(appPath, "/") {
+		appPath = "/" + appPath
+	}
+	return appPath
+}
+
+//formApp build App from marathonApp
+func formApp(mApp marathonApp, appPath string) App {
+	endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
+	app := App{
+		Id:              appPath,
+		Frontend:        strings.Replace(appPath, "/", "::", -1),
+		HealthCheckPath: parseHealthCheckPath(mApp.HealthChecks),
+		Env:             mApp.Env,
+		Labels:          mApp.Labels,
+		Endpoints:       endpoints,
+		CurVsn:          mApp.Env["SRY_APP_VSN"],
+	}
+	app.HealthChecks = make([]HealthCheck, 0, len(mApp.HealthChecks))
+	for _, marathonCheck := range mApp.HealthChecks {
+		check := HealthCheck{
+			Protocol:  marathonCheck.Protocol,
+			Path:      marathonCheck.Path,
+			PortIndex: marathonCheck.PortIndex,
+		}
+		app.HealthChecks = append(app.HealthChecks, check)
+	}
+
+	if len(mApp.Ports) > 0 {
+		app.ServicePort = mApp.Ports[0]
+		app.ServicePorts = mApp.Ports
+	}
+
+	return app
 }
 
 func parseHealthCheckPath(checks []marathonHealthCheck) string {
@@ -279,7 +365,8 @@ func _fetchApps(url string, conf *configuration.Configuration) (AppList, error) 
 	if err != nil {
 		return nil, err
 	}
-
+	log.Println("got mapps", len(marathonApps))
+	log.Println("got mtasks", len(tasks))
 	apps := createApps(tasks, marathonApps)
 	sort.Sort(apps)
 	return apps, nil

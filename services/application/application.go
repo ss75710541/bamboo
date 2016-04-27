@@ -1,12 +1,12 @@
 package application
 
-type Application struct {
-	ID     string `param:"id" json:"id"`
-	Weight int    `param:"weight" json:"weight"`
+type Weight struct {
+	ID       string         `param:"id" json:"id"`
+	Versions map[string]int `param:"versions" json:"versions"`
 }
 
 type Storage interface {
-	All() ([]Application, error)
-	Upsert(app Application) error
-	Delete(appId string) error
+	All() ([]Weight, error)
+	Upsert(weight Weight) error
+	Delete(ID string) error
 }
