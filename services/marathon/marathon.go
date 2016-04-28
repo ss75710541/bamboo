@@ -206,11 +206,15 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 		app, ok := appMap[appPath]
 		if !ok {
 			newApp := formApp(mApp, appPath)
+			endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
+			newApp.Endpoints = endpoints
 			app = &newApp
 			appMap[appPath] = app
 		}
 		if mApp.Env["SRY_APP_VSN"] < app.CurVsn {
 			app.CurVsn = mApp.Env["SRY_APP_VSN"]
+			endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
+			app.Endpoints = endpoints
 		}
 		tasks := formTasks(mApp, *app, tasksById)
 		tasksJson, _ := json.Marshal(tasks)
@@ -294,14 +298,12 @@ func formPath(mApp marathonApp) string {
 
 //formApp build App from marathonApp
 func formApp(mApp marathonApp, appPath string) App {
-	endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
 	app := App{
 		Id:              appPath,
 		Frontend:        strings.Replace(appPath, "/", "::", -1),
 		HealthCheckPath: parseHealthCheckPath(mApp.HealthChecks),
 		Env:             mApp.Env,
 		Labels:          mApp.Labels,
-		Endpoints:       endpoints,
 		CurVsn:          mApp.Env["SRY_APP_VSN"],
 	}
 	app.HealthChecks = make([]HealthCheck, 0, len(mApp.HealthChecks))
