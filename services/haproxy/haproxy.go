@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"runtime"
+	"sort"
 
 	conf "github.com/QubitProducts/bamboo/configuration"
 	"github.com/QubitProducts/bamboo/services/application"
@@ -27,11 +28,34 @@ type Server struct {
 	Weight  int
 }
 
+type ByVersion []Server
+
+func (a ByVersion) Len() int {
+	return len(a)
+}
+func (a ByVersion) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+func (a ByVersion) Less(i, j int) bool {
+	return a[i].Version < a[j].Version
+}
+
 type Frontend struct {
 	Name     string
 	Protocol string
 	Bind     int
 	Servers  []Server
+}
+type ByBind []Frontend
+
+func (a ByBind) Len() int {
+	return len(a)
+}
+func (a ByBind) Swap(i, j int) {
+	a[i], a[j] = a[j], a[i]
+}
+func (a ByBind) Less(i, j int) bool {
+	return a[i].Bind < a[j].Bind
 }
 
 var FrontendMap map[string]Frontend = make(map[string]Frontend)
@@ -112,6 +136,7 @@ func formFrontends(apps marathon.AppList) []Frontend {
 					}
 					servers = append(servers, server)
 				}
+				sort.Sort(ByVersion(servers))
 				frontend.Servers = servers
 
 				frontends = append(frontends, frontend)
@@ -119,6 +144,7 @@ func formFrontends(apps marathon.AppList) []Frontend {
 			}
 		}
 	}
+	sort.Sort(ByBind(frontends))
 	return frontends
 }
 
