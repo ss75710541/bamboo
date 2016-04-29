@@ -7,5 +7,5 @@ docker run -it \
     -e BAMBOO_ZK_PATH=/bb_gateway \
     -e BIND=":5090" \
     -e CONFIG_PATH="config/production.json" \
-    --name=omega-bamboo \
-    registry.shurenyun.com/bamboo-0.2.14:omega.v2.3
+    --name=bamboo \
+    registry.shurenyun.com/bamboo-0.2.14:omega.v2.4

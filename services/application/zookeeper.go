@@ -1,12 +1,19 @@
-package service
+package application
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/url"
 
 	"github.com/QubitProducts/bamboo/Godeps/_workspace/src/github.com/samuel/go-zookeeper/zk"
 	conf "github.com/QubitProducts/bamboo/configuration"
+)
+
+var (
+	//ErrBadBody invalid bytes
+	ErrBadBody = errors.New("Bad weight bytes")
 )
 
 type ZKStorage struct {
@@ -20,14 +27,14 @@ func NewZKStorage(conn *zk.Conn, conf conf.Zookeeper) (s *ZKStorage, err error) 
 	s = &ZKStorage{
 		conn: conn,
 		conf: conf,
-		path: fmt.Sprintf("%s/%s", conf.Path, "services"),
+		path: fmt.Sprintf("%s/%s", conf.Path, "weights"),
 		acl:  defaultACL(),
 	}
 	err = s.ensurePathExists()
 	return s, err
 }
 
-func (z *ZKStorage) All() (services []Service, err error) {
+func (z *ZKStorage) All() (weights []Weight, err error) {
 	err = z.ensurePathExists()
 	if err != nil {
 		return
@@ -38,7 +45,7 @@ func (z *ZKStorage) All() (services []Service, err error) {
 		return
 	}
 
-	services = make([]Service, 0, len(keys))
+	weights = make([]Weight, 0, len(keys))
 	for _, childPath := range keys {
 		body, _, err := z.conn.Get(z.path + "/" + childPath)
 		if err != nil {
@@ -50,23 +57,21 @@ func (z *ZKStorage) All() (services []Service, err error) {
 			return nil, err
 		}
 
-		// We tolerate being unable to decode a service body, as may be new version running simultaneously
-		repr, err := ParseServiceRepr(body, path)
+		weight, err := parseWeight(body, path)
 		if err != nil {
-			log.Printf("Failed to parse service at %v: %v", path, err)
+			log.Printf("Failed to parse weight at %v: %v", path, err)
 			continue
 		}
 
-		services = append(services, repr.Service())
+		weights = append(weights, weight)
 	}
 
 	return
 }
 
-func (z *ZKStorage) Upsert(service Service) (err error) {
-	repr := MakeV2ServiceRepr(service)
+func (z *ZKStorage) Upsert(weight Weight) (err error) {
+	body, err := encodeWeight(weight)
 
-	body, err := repr.Serialize()
 	if err != nil {
 		return
 	}
@@ -76,7 +81,7 @@ func (z *ZKStorage) Upsert(service Service) (err error) {
 		return err
 	}
 
-	path := z.servicePath(service.Id)
+	path := z.weightPath(weight.ID)
 
 	ok, _, err := z.conn.Exists(path)
 	if err != nil {
@@ -107,12 +112,13 @@ func (z *ZKStorage) Upsert(service Service) (err error) {
 	return
 }
 
-func (z *ZKStorage) Delete(serviceId string) error {
-	path := z.servicePath(serviceId)
+func (z *ZKStorage) Delete(id string) error {
+	path := z.weightPath(id)
+	log.Println("path", path)
 	return z.conn.Delete(path, -1)
 }
 
-func (z *ZKStorage) servicePath(id string) string {
+func (z *ZKStorage) weightPath(id string) string {
 	return z.path + "/" + escapePath(id)
 }
 
@@ -132,14 +138,28 @@ func (z *ZKStorage) ensurePathExists() error {
 	return err
 }
 
-func defaultACL() []zk.ACL {
-	return []zk.ACL{zk.ACL{Perms: zk.PermAll, Scheme: "world", ID: "anyone"}}
-}
-
 func escapePath(path string) string {
 	return url.QueryEscape(path)
 }
 
 func unescapePath(path string) (string, error) {
 	return url.QueryUnescape(path)
+}
+
+func defaultACL() []zk.ACL {
+	return []zk.ACL{zk.ACL{Perms: zk.PermAll, Scheme: "world", ID: "anyone"}}
+}
+
+func parseWeight(body []byte, path string) (weight Weight, err error) {
+	err = json.Unmarshal(body, &weight)
+	if err != nil {
+		return weight, ErrBadBody
+	}
+	weight.ID = path
+
+	return weight, nil
+}
+
+func encodeWeight(weight Weight) ([]byte, error) {
+	return json.Marshal(weight)
 }

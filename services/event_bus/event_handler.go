@@ -1,17 +1,21 @@
 package event_bus
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
-	"github.com/QubitProducts/bamboo/configuration"
-	"github.com/QubitProducts/bamboo/services/haproxy"
-	"github.com/QubitProducts/bamboo/services/service"
-	"github.com/QubitProducts/bamboo/services/template"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"time"
+
+	"github.com/QubitProducts/bamboo/configuration"
+	"github.com/QubitProducts/bamboo/services/application"
+	"github.com/QubitProducts/bamboo/services/haproxy"
+	"github.com/QubitProducts/bamboo/services/service"
+	"github.com/QubitProducts/bamboo/services/template"
 )
 
 var TemplateInvalid bool
@@ -32,9 +36,14 @@ type ServiceEvent struct {
 	EventType string
 }
 
+type WeightEvent struct {
+	EventType string
+}
+
 type Handlers struct {
-	Conf    *configuration.Configuration
-	Storage service.Storage
+	Conf       *configuration.Configuration
+	Storage    service.Storage
+	AppStorage application.Storage
 }
 
 func (h *Handlers) MarathonEventHandler(event MarathonEvent) {
@@ -49,6 +58,68 @@ func (h *Handlers) ServiceEventHandler(event ServiceEvent) {
 	h.Conf.StatsD.Increment(1.0, "reload.domain", 1)
 }
 
+func (h *Handlers) WeightEventHandler(event WeightEvent) {
+	log.Println("Weight changed")
+	frontendMapJson, _ := json.Marshal(haproxy.FrontendMap)
+	log.Println("frontendMap", string(frontendMapJson))
+
+	weights, err := h.AppStorage.All()
+	if err != nil {
+		log.Println("Error: can't fetch weights", err.Error())
+		return
+	}
+	weightJson, _ := json.Marshal(weights)
+	log.Println("weight", string(weightJson))
+
+	for _, weight := range weights {
+		if frontend, ok := haproxy.FrontendMap[weight.ID]; ok {
+			servers := haproxy.CalcWeights(frontend, weight)
+			updateWeight(h.Conf, servers)
+		}
+	}
+	// save weight into config file for haproxy recovery
+	content, err := generateConfig(h)
+	if err != nil {
+		log.Println("can't generate config", err.Error())
+	}
+	err = ioutil.WriteFile(h.Conf.HAProxy.OutputPath, []byte(content), 0666)
+	if err != nil {
+		log.Println("Failed to write template on path", h.Conf.HAProxy.OutputPath)
+	}
+}
+
+func updateWeight(conf *configuration.Configuration, servers []map[string]interface{}) {
+	if len(servers) < 1 {
+		log.Println("empty servers")
+		return
+	}
+
+	json, err := json.Marshal(servers)
+	if err != nil {
+		log.Println(err.Error())
+		log.Println("Error: can't update app weight")
+		return
+	}
+	log.Println("serversJson", string(json))
+
+	client := &http.Client{}
+	addr := fmt.Sprintf("%s:%s/api/weight", conf.HAProxy.IP, conf.HAProxy.Port)
+	req, err := http.NewRequest("PUT", addr, bytes.NewBuffer(json))
+	req.Close = true
+	if err != nil {
+		log.Println("Failed to creat new http request: ", err)
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Println("Http request failed: ", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	log.Println("updated", string(json), resp.StatusCode)
+}
+
 var updateChan = make(chan *Handlers, 1)
 
 func init() {
@@ -56,7 +127,7 @@ func init() {
 		log.Println("Starting update loop")
 		for {
 			h := <-updateChan
-			handleHAPUpdate(h.Conf, h.Storage)
+			handleHAPUpdate(h)
 		}
 	}()
 }
@@ -77,31 +148,31 @@ func queueUpdate(h *Handlers) {
 	<-queueUpdateSem
 }
 
-func handleHAPUpdate(conf *configuration.Configuration, storage service.Storage) {
+func handleHAPUpdate(h *Handlers) {
 	reloadStart := time.Now()
-	reloaded, err := ensureLatestConfig(conf, storage)
+	reloaded, err := ensureLatestConfig(h)
 
 	if err != nil {
-		conf.StatsD.Increment(1.0, "haproxy.reload.error", 1)
+		h.Conf.StatsD.Increment(1.0, "haproxy.reload.error", 1)
 		log.Println("Failed to update HAProxy configuration:", err)
 	} else if reloaded {
-		conf.StatsD.Timing(1.0, "haproxy.reload.marathon.duration", time.Since(reloadStart))
-		conf.StatsD.Increment(1.0, "haproxy.reload.marathon.reloaded", 1)
+		h.Conf.StatsD.Timing(1.0, "haproxy.reload.marathon.duration", time.Since(reloadStart))
+		h.Conf.StatsD.Increment(1.0, "haproxy.reload.marathon.reloaded", 1)
 		log.Println("Reloaded HAProxy configuration")
 	} else {
-		conf.StatsD.Increment(1.0, "haproxy.reload.skipped", 1)
+		h.Conf.StatsD.Increment(1.0, "haproxy.reload.skipped", 1)
 		log.Println("Skipped HAProxy configuration reload due to lack of changes")
 	}
 }
 
 // For values of 'latest' conforming to general relativity.
-func ensureLatestConfig(conf *configuration.Configuration, storage service.Storage) (reloaded bool, err error) {
-	content, err := generateConfig(conf.HAProxy.TemplatePath, conf, storage)
+func ensureLatestConfig(h *Handlers) (reloaded bool, err error) {
+	content, err := generateConfig(h)
 	if err != nil {
 		return
 	}
 
-	req, err := isReloadRequired(conf.HAProxy.OutputPath, content)
+	req, err := isReloadRequired(h.Conf.HAProxy.OutputPath, content)
 	if err != nil || !req {
 		return
 	}
@@ -111,9 +182,9 @@ func ensureLatestConfig(conf *configuration.Configuration, storage service.Stora
 			return
 		}*/
 
-	defer cleanupConfig(conf.HAProxy.ReloadCleanupCommand)
+	defer cleanupConfig(h.Conf.HAProxy.ReloadCleanupCommand)
 
-	reloaded, err = changeConfig(conf, content)
+	reloaded, err = changeConfig(h.Conf, content)
 	if err != nil {
 		return
 	}
@@ -122,21 +193,22 @@ func ensureLatestConfig(conf *configuration.Configuration, storage service.Stora
 }
 
 // Generates the new config to be written
-func generateConfig(templatePath string, conf *configuration.Configuration, storage service.Storage) (config string, err error) {
-	templateContent, err := ioutil.ReadFile(templatePath)
+func generateConfig(h *Handlers) (config string, err error) {
+	conf := h.Conf
+	templateContent, err := ioutil.ReadFile(conf.HAProxy.TemplatePath)
 	if err != nil {
 		log.Println("Failed to read template contents")
 		return
 	}
 
-	templateData, err := haproxy.GetTemplateData(conf, storage)
+	templateData, err := haproxy.GetTemplateData(conf, h.Storage, h.AppStorage)
 	if err != nil {
 		log.Println("Failed to retrieve template data")
 		TemplateInvalid = true
 		return
 	}
 
-	config, err = template.RenderTemplate(templatePath, string(templateContent), templateData)
+	config, err = template.RenderTemplate(conf.HAProxy.TemplatePath, string(templateContent), templateData)
 	if err != nil {
 		log.Println("Template syntax error")
 		TemplateInvalid = true
