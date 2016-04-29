@@ -24,7 +24,6 @@ type Server struct {
 	Version string
 	Host    string
 	Port    int
-	Weight  int
 }
 
 type Frontend struct {
@@ -42,10 +41,10 @@ func GetTemplateData(config *conf.Configuration, storage service.Storage, appSto
 		return nil, err
 	}
 
-	services, err := storage.All()
-	if err != nil {
-		return nil, err
-	}
+	//services, err := storage.All()
+	//if err != nil {
+	//return nil, err
+	//}
 
 	zkWeights, err := appStorage.All()
 	if err != nil {
@@ -55,16 +54,16 @@ func GetTemplateData(config *conf.Configuration, storage service.Storage, appSto
 	frontends := formFrontends(apps)
 	weightMap := formWeightMap(frontends, zkWeights)
 
-	byName := make(map[string]service.Service)
-	for _, service := range services {
-		byName[service.Id] = service
-	}
+	//byName := make(map[string]service.Service)
+	//for _, service := range services {
+	//byName[service.Id] = service
+	//}
 
 	cores := runtime.NumCPU()
 	if cores > 64 {
 		cores = 64
 	}
-	return &templateData{frontends, weightMap, byName, cores}, nil
+	return &templateData{frontends, weightMap, nil, cores}, nil
 }
 
 func formWeightMap(frontends []Frontend, zkWeights []application.Weight) map[string]int {
@@ -98,7 +97,6 @@ func formFrontends(apps marathon.AppList) []Frontend {
 						Version: task.Version,
 						Host:    task.Host,
 						Port:    task.Ports[epIdx],
-						Weight:  task.Weight,
 					}
 					servers = append(servers, server)
 				}
@@ -168,15 +166,16 @@ func formServers(frontend Frontend, weights map[string][2]int) []map[string]inte
 	for _, server := range frontend.Servers {
 		weight := weights[server.Version]
 		w, r := weight[0], weight[1]
+		//only use remainder on first server
 		if r > 0 {
-			w += r
-			weight[1] = 0
-			weights[server.Version] = weight
+			newWeight := weight
+			newWeight[1] = 0
+			weights[server.Version] = newWeight
 		}
 		svr := map[string]interface{}{
-			"frontend": frontend.Name,
-			"server":   server.Name,
-			"weight":   w,
+			"backend": frontend.Name,
+			"server":  server.Name,
+			"weight":  w + r,
 		}
 		servers = append(servers, svr)
 	}

@@ -211,6 +211,7 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 			app = &newApp
 			appMap[appPath] = app
 		}
+		//compare and select min version
 		if mApp.Env["SRY_APP_VSN"] < app.CurVsn {
 			app.CurVsn = mApp.Env["SRY_APP_VSN"]
 			endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
@@ -290,10 +291,7 @@ func formPath(mApp marathonApp) string {
 	} else {
 		appPath = mApp.Id
 	}
-	if !strings.HasPrefix(appPath, "/") {
-		appPath = "/" + appPath
-	}
-	return appPath
+	return strings.TrimPrefix(appPath, "/")
 }
 
 //formApp build App from marathonApp

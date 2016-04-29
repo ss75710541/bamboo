@@ -9,8 +9,8 @@ import (
 	"github.com/QubitProducts/bamboo/services/service"
 )
 
-func hasKey(data map[string]service.Service, appId string) bool {
-	_, exists := data[appId]
+func hasWeight(data map[string]int, key string) bool {
+	_, exists := data[key]
 	return exists
 }
 
@@ -24,7 +24,7 @@ func getService(data map[string]service.Service, appId string) service.Service {
 */
 func RenderTemplate(templateName string, templateContent string, data interface{}) (string, error) {
 	funcMap := template.FuncMap{
-		"hasKey":     hasKey,
+		"hasWeight":  hasWeight,
 		"getService": getService,
 		"Split":      strings.Split,
 		"Contains":   strings.Contains,

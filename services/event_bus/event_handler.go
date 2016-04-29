@@ -77,7 +77,7 @@ func (h *Handlers) WeightEventHandler(event WeightEvent) {
 			updateWeight(h.Conf, servers)
 		}
 	}
-
+	// save weight into config file for haproxy recovery
 	content, err := generateConfig(h)
 	if err != nil {
 		log.Println("can't generate config", err.Error())
