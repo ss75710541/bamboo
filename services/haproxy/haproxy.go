@@ -24,6 +24,7 @@ type Server struct {
 	Version string
 	Host    string
 	Port    int
+	Weight  int
 }
 
 type Frontend struct {
@@ -52,7 +53,7 @@ func GetTemplateData(config *conf.Configuration, storage service.Storage, appSto
 	}
 	apps = handleCanary(apps, zkWeights)
 	frontends := formFrontends(apps)
-	weightMap := formWeightMap(frontends, zkWeights)
+	weightMap := formWeightMap(zkWeights)
 
 	//byName := make(map[string]service.Service)
 	//for _, service := range services {
@@ -66,13 +67,23 @@ func GetTemplateData(config *conf.Configuration, storage service.Storage, appSto
 	return &templateData{frontends, weightMap, nil, cores}, nil
 }
 
-func formWeightMap(frontends []Frontend, zkWeights []application.Weight) map[string]int {
+func formWeightMap(zkWeights []application.Weight) map[string]int {
 	weightMap := map[string]int{}
+	processed := map[string]bool{}
 	for _, weight := range zkWeights {
 		if frontend, ok := FrontendMap[weight.ID]; ok {
 			servers := CalcWeights(frontend, weight)
 			for _, server := range servers {
 				weightMap[server["server"].(string)] = server["weight"].(int)
+			}
+			processed[weight.ID] = true
+		}
+	}
+	//set initial weight
+	for id, frontend := range FrontendMap {
+		if !processed[id] {
+			for _, server := range frontend.Servers {
+				weightMap[server.Name] = server.Weight
 			}
 		}
 	}
@@ -97,6 +108,7 @@ func formFrontends(apps marathon.AppList) []Frontend {
 						Version: task.Version,
 						Host:    task.Host,
 						Port:    task.Ports[epIdx],
+						Weight:  task.Weight,
 					}
 					servers = append(servers, server)
 				}
