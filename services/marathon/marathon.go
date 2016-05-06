@@ -206,16 +206,21 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 		app, ok := appMap[appPath]
 		if !ok {
 			newApp := formApp(mApp, appPath)
-			endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
-			newApp.Endpoints = endpoints
-			app = &newApp
-			appMap[appPath] = app
+
+			if endpointStr, ok := mApp.Env["BB_DM_ENDPOINTS"]; ok {
+				endpoints := formEndpoints(endpointStr)
+				newApp.Endpoints = endpoints
+				app = &newApp
+				appMap[appPath] = app
+			}
 		}
 		//compare and select min version
 		if mApp.Env["SRY_APP_VSN"] < app.CurVsn {
 			app.CurVsn = mApp.Env["SRY_APP_VSN"]
-			endpoints := formEndpoints(mApp.Env["BB_DM_ENDPOINTS"])
-			app.Endpoints = endpoints
+			if endpointStr, ok := mApp.Env["BB_DM_ENDPOINTS"]; ok {
+				endpoints := formEndpoints(endpointStr)
+				app.Endpoints = endpoints
+			}
 		}
 		tasks := formTasks(mApp, *app, tasksById)
 		tasksJson, _ := json.Marshal(tasks)
@@ -268,6 +273,9 @@ func formEndpoints(str string) []Endpoint {
 	endpoints := []Endpoint{}
 	for _, epStr := range epStrSlices {
 		epParts := strings.Split(epStr, ":")
+		if len(epParts) < 4 {
+			continue
+		}
 		bind, err := strconv.Atoi(epParts[3])
 		if err != nil {
 			log.Panicln("bad bind value", err.Error())
