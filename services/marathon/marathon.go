@@ -214,14 +214,16 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 				appMap[appPath] = app
 			}
 		}
+
 		//compare and select min version
-		if mApp.Env["SRY_APP_VSN"] < app.CurVsn {
-			app.CurVsn = mApp.Env["SRY_APP_VSN"]
+		if appVersionStr, ok := mApp.Env["SRY_APP_VSN"]; ok && appVersionStr < app.CurVsn {
+			app.CurVsn = appVersionStr
 			if endpointStr, ok := mApp.Env["BB_DM_ENDPOINTS"]; ok {
 				endpoints := formEndpoints(endpointStr)
 				app.Endpoints = endpoints
 			}
 		}
+
 		tasks := formTasks(mApp, *app, tasksById)
 		tasksJson, _ := json.Marshal(tasks)
 		log.Println("tasks", string(tasksJson))
