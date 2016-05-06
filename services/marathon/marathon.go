@@ -210,9 +210,9 @@ func createApps(tasksById map[string]marathonTaskList, marathonApps map[string]m
 			if endpointStr, ok := mApp.Env["BB_DM_ENDPOINTS"]; ok {
 				endpoints := formEndpoints(endpointStr)
 				newApp.Endpoints = endpoints
-				app = &newApp
-				appMap[appPath] = app
 			}
+			app = &newApp
+			appMap[appPath] = app
 		}
 
 		//compare and select min version
