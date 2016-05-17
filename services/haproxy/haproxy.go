@@ -117,7 +117,8 @@ func formWeightMap(zkWeights []application.Weight) map[string]int {
 func formFrontends(apps marathon.AppList) []Frontend {
 	frontends := []Frontend{}
 	for _, app := range apps {
-		if len(app.Endpoints) > 0 {
+		endpointsLen := len(app.Endpoints)
+		if endpointsLen > 0 {
 			for epIdx, endpoint := range app.Endpoints {
 				frontend := Frontend{
 					Name:     fmt.Sprintf("%s-%s-%d", app.Frontend, endpoint.Protocol, endpoint.Bind),
@@ -127,6 +128,9 @@ func formFrontends(apps marathon.AppList) []Frontend {
 
 				servers := []Server{}
 				for _, task := range app.Tasks {
+					if len(task.Ports) != endpointsLen {
+						continue
+					}
 					server := Server{
 						Name:    fmt.Sprintf("%s-%s-%d", task.Server, task.Version, task.Ports[epIdx]),
 						Version: task.Version,
