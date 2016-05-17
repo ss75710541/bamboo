@@ -148,7 +148,6 @@ func executableFolder() string {
 }
 
 func registerMarathonEvent(conf *configuration.Configuration) {
-
 	client := &http.Client{}
 	// it's safe to register with multiple marathon nodes
 	for _, marathon := range conf.Marathon.Endpoints() {
