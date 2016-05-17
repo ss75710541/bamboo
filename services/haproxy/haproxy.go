@@ -128,6 +128,8 @@ func formFrontends(apps marathon.AppList) []Frontend {
 
 				servers := []Server{}
 				for _, task := range app.Tasks {
+					// endpoint contain haproxy map port so endpoint must one-one correspondence task.Port
+					// then length of endpoint must be equal to length task.Port
 					if len(task.Ports) != endpointsLen {
 						continue
 					}
