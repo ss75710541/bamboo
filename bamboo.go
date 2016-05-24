@@ -92,6 +92,9 @@ func main() {
 	// Handle gracefully exit
 	registerOSSignals()
 
+	// load config
+	api.LoadConfig(conf)
+
 	// Start server
 	initServer(&conf, storage, appStorage, eventBus)
 }
