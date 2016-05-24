@@ -160,7 +160,7 @@ func registerMarathonEvent(marathonEnp string) error {
 		return err
 	}
 	bodyBytes, err := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
+	defer resp.Body.Close()
 	if err != nil {
 		log.Fatal(err)
 		return err
