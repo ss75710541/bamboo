@@ -127,12 +127,12 @@ func HealthCheck(w http.ResponseWriter, r *http.Request) {
 	for _, marathonEnp := range MarathonEndpoints {
 		if registered := checkMarathonCallback(marathonEnp); !registered {
 			if err := registerMarathonEvent(marathonEnp); err != nil {
-				http.Error(w, "template error", http.StatusInternalServerError)
+				http.Error(w, "healthcheck failed", http.StatusInternalServerError)
 				return
 			}
 		}
 	}
-	io.WriteString(w, "template OK")
+	io.WriteString(w, "healthcheck success")
 }
 
 func responseJSON(w http.ResponseWriter, data interface{}) {
