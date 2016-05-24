@@ -92,6 +92,9 @@ func main() {
 	// Handle gracefully exit
 	registerOSSignals()
 
+	// load config
+	api.LoadConfig(conf)
+
 	// Start server
 	initServer(&conf, storage, appStorage, eventBus)
 }
@@ -164,7 +167,7 @@ func registerMarathonEvent(conf *configuration.Configuration) {
 			return
 		}
 		bodyBytes, err := ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
+		defer resp.Body.Close()
 		if err != nil {
 			log.Fatal(err)
 			return
