@@ -2,6 +2,7 @@ package event_bus
 
 import (
 	"bytes"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -177,13 +178,6 @@ func ensureLatestConfig(h *Handlers) (reloaded bool, err error) {
 		return
 	}
 
-	/*	err = validateConfig(conf.HAProxy.ReloadValidationCommand, content)
-		if err != nil {
-			return
-		}*/
-
-	defer cleanupConfig(h.Conf.HAProxy.ReloadCleanupCommand)
-
 	reloaded, err = changeConfig(h.Conf, content)
 	if err != nil {
 		return
@@ -224,7 +218,11 @@ func isReloadRequired(configPath string, newContent string) (bool, error) {
 	currentContent, err := ioutil.ReadFile(configPath)
 
 	if err == nil {
-		return newContent != string(currentContent), nil
+		oldMd5 := md5.Sum(currentContent)
+		newMd5 := md5.Sum([]byte(newContent))
+		log.Println("old content md5: ", oldMd5, "new content md5: ", newMd5)
+		return oldMd5 != newMd5, nil
+		// return newContent != string(currentContent), nil
 	} else if os.IsNotExist(err) {
 		return true, nil
 	}
@@ -276,11 +274,6 @@ func changeConfig(conf *configuration.Configuration, newContent string) (reloade
 		return
 	}
 
-	/*	err = execCommand(conf.HAProxy.ReloadCommand)
-		if err != nil {
-			return
-		}*/
-
 	client := &http.Client{}
 	addr := fmt.Sprintf("%s:%s/api/haproxy", conf.HAProxy.IP, conf.HAProxy.Port)
 	req, err := http.NewRequest("PUT", addr, nil)
@@ -297,12 +290,6 @@ func changeConfig(conf *configuration.Configuration, newContent string) (reloade
 
 	reloaded = true
 	return
-}
-
-// This will be executed in a deferred, so is rather self contained
-func cleanupConfig(command string) {
-	log.Println("Cleaning up config")
-	execCommand(command)
 }
 
 func execCommand(cmd string) error {
