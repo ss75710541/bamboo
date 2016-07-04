@@ -218,9 +218,12 @@ func isReloadRequired(configPath string, newContent string) (bool, error) {
 	currentContent, err := ioutil.ReadFile(configPath)
 
 	if err == nil {
+		if newContent != string(currentContent) {
+			log.Println("Content compare need reload")
+		}
 		oldMd5 := md5.Sum(currentContent)
 		newMd5 := md5.Sum([]byte(newContent))
-		log.Println("old content md5: ", oldMd5, "new content md5: ", newMd5)
+		log.Println("old content md5: ", string(oldMd5), "new content md5: ", string(newMd5))
 		return oldMd5 != newMd5, nil
 		// return newContent != string(currentContent), nil
 	} else if os.IsNotExist(err) {
