@@ -128,16 +128,18 @@ func HealthCheck(w http.ResponseWriter, r *http.Request) {
 	var numUnregisterd = 0
 	for _, marathonEnp := range MarathonEndpoints {
 		if registered := checkMarathonCallback(marathonEnp); !registered {
-			numUnregisterd++
-			if numUnregisterd == numEndpoint {
-				if err := registerMarathonEvent(marathonEnp); err != nil {
-					http.Error(w, "healthcheck failed", http.StatusInternalServerError)
-					return
-				}
+			if err := registerMarathonEvent(marathonEnp); err != nil {
+				log.Println("healthcheck failed")
+				numUnregisterd++
 			}
 		}
-
 	}
+
+	if numUnregisterd == numEndpoint {
+		http.Error(w, "healthcheck failed", http.StatusInternalServerError)
+		return
+	}
+
 	io.WriteString(w, "healthcheck success")
 }
 
