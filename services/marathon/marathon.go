@@ -52,6 +52,7 @@ type App struct {
 	Labels          map[string]string
 	Endpoints       []Endpoint
 	CurVsn          string
+	Container       *marathonContainer `json:"container"`
 }
 
 type AppList []App
@@ -74,6 +75,11 @@ type marathonTasks struct {
 	Tasks marathonTaskList `json:"tasks"`
 }
 
+type marathonIPAddr struct {
+	IPAddr   *string `json:"ipAddress"`
+	Protocol *string `json:"protocol"`
+}
+
 type marathonTask struct {
 	AppId        string
 	Id           string
@@ -83,6 +89,7 @@ type marathonTask struct {
 	StartedAt    string
 	StagedAt     string
 	Version      string
+	IPAddrs      []*marathonIPAddr `json:"ipAddresses", type:"list"`
 }
 
 func (slice marathonTaskList) Len() int {
@@ -107,6 +114,24 @@ type marathonApp struct {
 	Ports        []int                 `json:"ports"`
 	Env          map[string]string     `json:"env"`
 	Labels       map[string]string     `json:"labels"`
+	Container    *marathonContainer    `json:"container"`
+}
+
+type marathonContainer struct {
+	Type   *string         `json:"type"`
+	Docker *marathonDocker `json:"docker"`
+}
+
+type marathonDocker struct {
+	Network      *string                `json:"network"`
+	PortMappings []*marathonPortMapping `json:"portMappings"`
+}
+
+type marathonPortMapping struct {
+	ContainerPort *int64  `json:"containerPort"`
+	HostPort      *int64  `json:"hostPost"`
+	ServicePort   *int64  `json:"servicePort"`
+	Protocol      *string `json:"protocol"`
 }
 
 type marathonHealthCheck struct {
@@ -245,17 +270,50 @@ func formTasks(mApp marathonApp, app App, tasksById map[string]marathonTaskList)
 	tasks := []Task{}
 	for _, mTask := range tasksById[mApp.Id] {
 		if len(mTask.Ports) > 0 {
-			server := fmt.Sprintf("%s-%s", app.Frontend, mTask.Host)
-			t := Task{
-				Frontend: app.Frontend,
-				Server:   server,
-				Host:     mTask.Host,
-				Port:     mTask.Ports[0],
-				Ports:    mTask.Ports,
-				Version:  mApp.Env["SRY_APP_VSN"],
-				Weight:   1,
+			if _, ok := mApp.Env["DM_IP_PER_CONTAINER"]; ok {
+				// try to replace Host with IPAddr, Port with containerPort
+				var IPAddr string
+				if len(mTask.IPAddrs) > 0 {
+					IPAddr = *mTask.IPAddrs[0].IPAddr
+				} else {
+					// log error
+					log.Println("No IPAddrs found for: ", string(mApp.Id))
+					continue
+				}
+				var ports []int
+				if len(mApp.Container.Docker.PortMappings) > 0 {
+					for _, portMapping := range mApp.Container.Docker.PortMappings {
+						ports = append(ports, int(*portMapping.ContainerPort))
+					}
+				} else {
+					// log error
+					log.Println("No PortMappings found for: ", string(mApp.Id))
+					continue
+				}
+				server := fmt.Sprintf("%s-%s", app.Frontend, IPAddr)
+				t := Task{
+					Frontend: app.Frontend,
+					Server:   server,
+					Host:     IPAddr,
+					Port:     mTask.Ports[0],
+					Ports:    ports,
+					Version:  mApp.Env["SRY_APP_VSN"],
+					Weight:   1,
+				}
+				tasks = append(tasks, t)
+			} else {
+				server := fmt.Sprintf("%s-%s", app.Frontend, mTask.Host)
+				t := Task{
+					Frontend: app.Frontend,
+					Server:   server,
+					Host:     mTask.Host,
+					Port:     mTask.Ports[0],
+					Ports:    mTask.Ports,
+					Version:  mApp.Env["SRY_APP_VSN"],
+					Weight:   1,
+				}
+				tasks = append(tasks, t)
 			}
-			tasks = append(tasks, t)
 		}
 	}
 	return tasks
@@ -313,6 +371,7 @@ func formApp(mApp marathonApp, appPath string) App {
 		Env:             mApp.Env,
 		Labels:          mApp.Labels,
 		CurVsn:          mApp.Env["SRY_APP_VSN"],
+		Container:       mApp.Container,
 	}
 	app.HealthChecks = make([]HealthCheck, 0, len(mApp.HealthChecks))
 	for _, marathonCheck := range mApp.HealthChecks {

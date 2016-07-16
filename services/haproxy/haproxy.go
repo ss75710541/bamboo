@@ -133,14 +133,37 @@ func formFrontends(apps marathon.AppList) []Frontend {
 					if len(task.Ports) != endpointsLen {
 						continue
 					}
-					server := Server{
-						Name:    fmt.Sprintf("%s-%s-%d", task.Server, task.Version, task.Ports[epIdx]),
-						Version: task.Version,
-						Host:    task.Host,
-						Port:    task.Ports[epIdx],
-						Weight:  task.Weight,
+					if _, ok := app.Env["DM_IP_PER_CONTAINER"]; ok {
+						// try to replace Host with IPAddr, Port with containerPort
+						var ports []int
+						if len(app.Container.Docker.PortMappings) > 0 {
+							for _, portMapping := range app.Container.Docker.PortMappings {
+								ports = append(ports, int(*portMapping.ContainerPort))
+							}
+						} else {
+							// log error
+							log.Println("No PortMappings found for: ", string(app.Id))
+							continue
+						}
+						serverName := fmt.Sprintf("%s-%s", app.Frontend, task.Host)
+						server := Server{
+							Name:    fmt.Sprintf("%s-%s-%d", serverName, task.Version, ports[epIdx]),
+							Version: task.Version,
+							Host:    task.Host,
+							Port:    ports[epIdx],
+							Weight:  task.Weight,
+						}
+						servers = append(servers, server)
+					} else {
+						server := Server{
+							Name:    fmt.Sprintf("%s-%s-%d", task.Server, task.Version, task.Ports[epIdx]),
+							Version: task.Version,
+							Host:    task.Host,
+							Port:    task.Ports[epIdx],
+							Weight:  task.Weight,
+						}
+						servers = append(servers, server)
 					}
-					servers = append(servers, server)
 				}
 				sort.Sort(ByVersion(servers))
 				frontend.Servers = servers
