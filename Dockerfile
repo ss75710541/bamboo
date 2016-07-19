@@ -3,6 +3,8 @@ MAINTAINER Will <zhguo.dataman-inc.com>
 
 RUN mkdir -p /config
 
+RUN apk update && apk add curl git go bash supervisor net-tools && rm -rf /var/cache/apk/*
+
 ADD config/haproxy_template.cfg /config/haproxy_template.cfg
 ADD config/production.json /config/production.json
 
