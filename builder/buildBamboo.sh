@@ -1,11 +1,5 @@
 #!/bin/bash
 
-set -e
-
-echo "" > /etc/apk/repositories
-echo  http://mirrors.ustc.edu.cn/alpine/v3.4/main/  >>  /etc/apk/repositories
-echo  http://mirrors.ustc.edu.cn/alpine/v3.4/community/  >>  /etc/apk/repositories
-
 apk update && \
   apk add  --no-cache curl git bash go supervisor net-tools && rm -rf /var/cache/apk/*
 export GOROOT=/usr/lib/go
