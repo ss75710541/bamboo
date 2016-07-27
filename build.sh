@@ -8,4 +8,4 @@ HOST="catalog.shurenyun.com"
 NAMESPACE="library"
 TAG="omega.v2.5.7"
 
-docker build --no-cache -t ${IMAGE}:${TAG} -f Dockerfile .
+docker build --no-cache -t ${HOST}/${NAMESPACE}/${IMAGE}:${TAG} -f Dockerfile .
