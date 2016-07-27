@@ -1,5 +1,5 @@
-FROM demoregistry.dataman-inc.com/library/alpine3.3-base:latest
-MAINTAINER Will <zhguo.dataman-inc.com>
+FROM catalog.shurenyun.com/library/haproxy:1.5.18-alpine
+MAINTAINER Xiao Deshi <dsxiao@dataman-inc.com>
 
 RUN mkdir -p /config
 
@@ -17,4 +17,4 @@ RUN sh /buildBamboo.sh
 
 EXPOSE 5090
 
-CMD sh /run.sh   
+CMD sh /run.sh
